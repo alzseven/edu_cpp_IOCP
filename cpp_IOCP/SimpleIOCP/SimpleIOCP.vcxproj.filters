@@ -23,5 +23,8 @@
     <ClInclude Include="IOCompletionPort.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="Define.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
 </Project>
