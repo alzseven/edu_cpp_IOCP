@@ -22,8 +22,9 @@
     <ClCompile Include="main.cpp" />
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="IOCompletionPort.h" />
+    <ClInclude Include="EchoServer.h" />
     <ClInclude Include="Define.h" />
+    <ClInclude Include="IOCPServer.h" />
   </ItemGroup>
   <PropertyGroup Label="Globals">
     <VCProjectVersion>17.0</VCProjectVersion>
