@@ -2,8 +2,8 @@
 #include <winsock2.h>
 #include <Ws2tcpip.h>
 
-#define MAX_SOCKBUF 1024	//패킷 크기
-#define MAX_WORKERTHREAD 4  //쓰레드 풀에 넣을 쓰레드 수
+const UINT32 MAX_SOCKBUF = 256;	// 소켓 버퍼의 크기
+const UINT32 MAX_WORKERTHREAD = 4;  //쓰레드 풀에 넣을 쓰레드 수
 
 
 
