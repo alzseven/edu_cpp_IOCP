@@ -90,7 +90,7 @@ public:
 			return false;
 		}
 
-
+		//접속된 클라이언트 주소 정보를 저장할 구조체
 		bool bRet = CreateWokerThread();
 		if (false == bRet) {
 			return false;
@@ -101,6 +101,8 @@ public:
 			return false;
 		}
 
+		CreateSendThread();
+
 		printf("서버 시작\n");
 		return true;
 	}
@@ -108,15 +110,11 @@ public:
 	//생성되어있는 쓰레드를 파괴한다.
 	void DestroyThread()
 	{
-		mIsWorkerRun = false;
-		CloseHandle(mIOCPHandle);
+		mIsSenderRun = false;
 
-		for (auto& th : mIOWorkerThreads)
+		if (mSendThread.joinable())
 		{
-			if (th.joinable())
-			{
-				th.join();
-			}
+			mSendThread.join();
 		}
 
 		//Accepter 쓰레드를 종료한다.
@@ -126,6 +124,17 @@ public:
 		if (mAccepterThread.joinable())
 		{
 			mAccepterThread.join();
+		}
+
+		mIsWorkerRun = false;
+		CloseHandle(mIOCPHandle);
+
+		for (auto& th : mIOWorkerThreads)
+		{
+			if (th.joinable())
+			{
+				th.join();
+			}
 		}
 	}
 
@@ -145,16 +154,20 @@ private:
 	{
 		for (UINT32 i = 0; i < maxClientCount; ++i)
 		{
-			mClientInfos.emplace_back();
+			//mClientInfos.emplace_back();
+			//mClientInfos[i].Init(i);
+			auto client = new ClientInfo();
+			client->Init(i);
 
-			mClientInfos[i].Init(i);
+			mClientInfos.push_back(client);
 		}
 	}
 
 	//WaitingThread Queue에서 대기할 쓰레드들을 생성
 	bool CreateWokerThread()
 	{
-		unsigned int uiThreadId = 0;
+		mIsWorkerRun = true;
+
 		//WaingThread Queue에 대기 상태로 넣을 쓰레드들 생성 권장되는 개수 : (cpu개수 * 2) + 1 
 		for (int i = 0; i < MAX_WORKERTHREAD; i++)
 		{
@@ -168,20 +181,28 @@ private:
 	//accept요청을 처리하는 쓰레드 생성
 	bool CreateAccepterThread()
 	{
+		mIsAccepterRun = true;
 		mAccepterThread = std::thread([this]() { AccepterThread(); });
 
 		printf("AccepterThread 시작..\n");
 		return true;
 	}
 
+	void CreateSendThread()
+	{
+		mIsSenderRun = true;
+		mSendThread = std::thread([this]() { SendThread(); });
+		printf("SendThread 시작..\n");
+	}
+
 	//사용하지 않는 클라이언트 정보 구조체를 반환한다.
 	ClientInfo* GetEmptyClientInfo()
 	{
-		for (auto& client : mClientInfos)
+		for (auto client : mClientInfos)
 		{
-			if (client.IsConnected() == false)
+			if (client->IsConnected() == false)
 			{
-				return &client;
+				return client;
 			}
 		}
 		return nullptr;
@@ -189,7 +210,7 @@ private:
 
 	ClientInfo* GetClientInfo(const UINT32 sessionIndex)
 	{
-		return &mClientInfos[sessionIndex];
+		return mClientInfos[sessionIndex];
 	}
 
 	//Overlapped I/O작업에 대한 완료 통보를 받아 
@@ -197,7 +218,7 @@ private:
 	void WokerThread()
 	{
 		//CompletionKey를 받을 포인터 변수
-		ClientInfo* pClientInfo = NULL;
+		ClientInfo* pClientInfo = nullptr;
 		//함수 호출 성공 여부
 		BOOL bSuccess = TRUE;
 		//Overlapped I/O작업에서 전송된 데이터 크기
@@ -247,17 +268,15 @@ private:
 			//Overlapped I/O Recv작업 결과 뒤 처리
 			if (IOOperation::RECV == pOverlappedEx->m_eOperation)
 			{
-				//OnReceive(pClientInfo->mIndex, dwIoSize, pClientInfo->mRecvBuf);
 				OnReceive(pClientInfo->GetIndex(), dwIoSize, pClientInfo->RecvBuffer());
 
-				//BindRecv(pClientInfo);
 				pClientInfo->BindRecv();
 			}
 			//Overlapped I/O Send작업 결과 뒤 처리
 			else if (IOOperation::SEND == pOverlappedEx->m_eOperation)
 			{
-				delete[] pOverlappedEx->m_wsaBuf.buf;
-				delete pOverlappedEx;
+				// delete[] pOverlappedEx->m_wsaBuf.buf;
+				// delete pOverlappedEx;
 				pClientInfo->SendCompleted(dwIoSize);
 			}
 			//예외 상황
@@ -286,10 +305,7 @@ private:
 			}
 
 			//클라이언트 접속 요청이 들어올 때까지 기다린다.
-			//pClientInfo->m_socketClient = accept(mListenSocket, (SOCKADDR*)&stClientAddr, &nAddrLen);
 			auto newSocket = accept(mListenSocket, (SOCKADDR*)&stClientAddr, &nAddrLen);
-			
-			//if (INVALID_SOCKET == pClientInfo->m_socketClient)
 			if(INVALID_SOCKET == newSocket)
 			{
 				continue;
@@ -312,6 +328,24 @@ private:
 		}
 	}
 
+	void SendThread()
+	{
+		while (mIsSenderRun)
+		{
+			for (auto client : mClientInfos)
+			{
+				if (client->IsConnected() == false)
+				{
+					continue;
+				}
+
+				client->SendIO();
+			}
+
+			std::this_thread::sleep_for(std::chrono::milliseconds(8));
+		}
+	}
+
 	//소켓의 연결을 종료 시킨다.
 	void CloseSocket(ClientInfo* pClientInfo, bool bIsForce = false)
 	{
@@ -325,7 +359,7 @@ private:
 
 
 	//클라이언트 정보 저장 구조체
-	std::vector<ClientInfo> mClientInfos;
+	std::vector<ClientInfo*> mClientInfos;
 
 	//클라이언트의 접속을 받기위한 리슨 소켓
 	SOCKET		mListenSocket = INVALID_SOCKET;
@@ -338,6 +372,11 @@ private:
 
 	//Accept 스레드
 	std::thread	mAccepterThread;
+
+	//접속 쓰레드 동작 플래그
+	bool		mIsSenderRun = false;
+	//Accept 스레드
+	std::thread	mSendThread;
 
 	//CompletionPort객체 핸들
 	HANDLE		mIOCPHandle = INVALID_HANDLE_VALUE;
