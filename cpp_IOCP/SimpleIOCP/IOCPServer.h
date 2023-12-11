@@ -82,7 +82,7 @@ public:
 	{
 		CreateClient(maxClientCount);
 
-
+		//CompletionPort객체 생성 요청을 한다.
 		mIOCPHandle = CreateIoCompletionPort(INVALID_HANDLE_VALUE, NULL, NULL, MAX_WORKERTHREAD);
 		if (NULL == mIOCPHandle)
 		{
@@ -101,7 +101,7 @@ public:
 			return false;
 		}
 
-		CreateSendThread();
+		//CreateSendThread();
 
 		printf("서버 시작\n");
 		return true;
@@ -110,22 +110,6 @@ public:
 	//생성되어있는 쓰레드를 파괴한다.
 	void DestroyThread()
 	{
-		mIsSenderRun = false;
-
-		if (mSendThread.joinable())
-		{
-			mSendThread.join();
-		}
-
-		//Accepter 쓰레드를 종료한다.
-		mIsAccepterRun = false;
-		closesocket(mListenSocket);
-
-		if (mAccepterThread.joinable())
-		{
-			mAccepterThread.join();
-		}
-
 		mIsWorkerRun = false;
 		CloseHandle(mIOCPHandle);
 
@@ -135,6 +119,15 @@ public:
 			{
 				th.join();
 			}
+		}
+
+		//Accepter 쓰레드를 종료한다.
+		mIsAccepterRun = false;
+		closesocket(mListenSocket);
+
+		if (mAccepterThread.joinable())
+		{
+			mAccepterThread.join();
 		}
 	}
 
@@ -166,7 +159,7 @@ private:
 	//WaitingThread Queue에서 대기할 쓰레드들을 생성
 	bool CreateWokerThread()
 	{
-		mIsWorkerRun = true;
+		//mIsWorkerRun = true;
 
 		//WaingThread Queue에 대기 상태로 넣을 쓰레드들 생성 권장되는 개수 : (cpu개수 * 2) + 1 
 		for (int i = 0; i < MAX_WORKERTHREAD; i++)
@@ -181,24 +174,24 @@ private:
 	//accept요청을 처리하는 쓰레드 생성
 	bool CreateAccepterThread()
 	{
-		mIsAccepterRun = true;
+		//mIsAccepterRun = true;
 		mAccepterThread = std::thread([this]() { AccepterThread(); });
 
 		printf("AccepterThread 시작..\n");
 		return true;
 	}
 
-	void CreateSendThread()
-	{
-		mIsSenderRun = true;
-		mSendThread = std::thread([this]() { SendThread(); });
-		printf("SendThread 시작..\n");
-	}
+	//void CreateSendThread()
+	//{
+	//	mIsSenderRun = true;
+	//	mSendThread = std::thread([this]() { SendThread(); });
+	//	printf("SendThread 시작..\n");
+	//}
 
 	//사용하지 않는 클라이언트 정보 구조체를 반환한다.
 	ClientInfo* GetEmptyClientInfo()
 	{
-		for (auto client : mClientInfos)
+		for (auto& client : mClientInfos)
 		{
 			if (client->IsConnected() == false)
 			{
@@ -263,7 +256,7 @@ private:
 			}
 
 
-			stOverlappedEx* pOverlappedEx = (stOverlappedEx*)lpOverlapped;
+			auto pOverlappedEx = (stOverlappedEx*)lpOverlapped;
 
 			//Overlapped I/O Recv작업 결과 뒤 처리
 			if (IOOperation::RECV == pOverlappedEx->m_eOperation)
@@ -275,14 +268,11 @@ private:
 			//Overlapped I/O Send작업 결과 뒤 처리
 			else if (IOOperation::SEND == pOverlappedEx->m_eOperation)
 			{
-				// delete[] pOverlappedEx->m_wsaBuf.buf;
-				// delete pOverlappedEx;
 				pClientInfo->SendCompleted(dwIoSize);
 			}
 			//예외 상황
 			else
 			{
-				//printf("socket(%d)에서 예외상황\n", (int)pClientInfo->m_socketClient);
 				printf("Client Index(%d)에서 예외상황\n", pClientInfo->GetIndex());
 			}
 		}
@@ -328,7 +318,7 @@ private:
 		}
 	}
 
-	void SendThread()
+	/*void SendThread()
 	{
 		while (mIsSenderRun)
 		{
@@ -344,12 +334,11 @@ private:
 
 			std::this_thread::sleep_for(std::chrono::milliseconds(8));
 		}
-	}
+	}*/
 
 	//소켓의 연결을 종료 시킨다.
 	void CloseSocket(ClientInfo* pClientInfo, bool bIsForce = false)
 	{
-		//auto clientIndex = pClientInfo->mIndex;
 		auto clientIndex = pClientInfo->GetIndex();
 
 		pClientInfo->Close(bIsForce);
@@ -373,8 +362,8 @@ private:
 	//Accept 스레드
 	std::thread	mAccepterThread;
 
-	//접속 쓰레드 동작 플래그
-	bool		mIsSenderRun = false;
+	////접속 쓰레드 동작 플래그
+	//bool		mIsSenderRun = false;
 	//Accept 스레드
 	std::thread	mSendThread;
 

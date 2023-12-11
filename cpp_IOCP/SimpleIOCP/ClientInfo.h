@@ -3,6 +3,7 @@
 #include "Define.h"
 #include <stdio.h>
 #include <mutex>
+#include <queue>
 
 class ClientInfo
 {
@@ -10,7 +11,7 @@ public:
 	ClientInfo()
 	{
 		ZeroMemory(&mRecvOverlappedEx, sizeof(stOverlappedEx));
-		ZeroMemory(&mSendOverlappedEx, sizeof(stOverlappedEx));
+		//ZeroMemory(&mSendOverlappedEx, sizeof(stOverlappedEx));
 		mSocket = INVALID_SOCKET;
 	}
 
@@ -68,8 +69,8 @@ public:
 
 	void Clear()
 	{
-		mSendPos = 0;
-		mIsSending = false;
+		//mSendPos = 0;
+		//mIsSending = false;
 	}
 
 	bool BindIOCompletionPort(HANDLE iocpHandle_)
@@ -118,72 +119,75 @@ public:
 	// 1개의 스레드에서만 호출해야 한다!
 	bool SendMsg(const UINT32 dataSize_, char* pMsg_)
 	{
+		auto sendOverlappedEx = new stOverlappedEx;
+		ZeroMemory(sendOverlappedEx, sizeof(stOverlappedEx));
+		sendOverlappedEx->m_wsaBuf.len = dataSize_;
+		sendOverlappedEx->m_wsaBuf.buf = new char[dataSize_];
+		CopyMemory(sendOverlappedEx->m_wsaBuf.buf, pMsg_, dataSize_);
+		sendOverlappedEx->m_eOperation = IOOperation::SEND;
+
 		std::lock_guard<std::mutex> guard(mSendLock);
 
-		if ((mSendPos + dataSize_) > MAX_SOCK_SENDBUF)
+		mSendDataqueue.push(sendOverlappedEx);
+
+		if (mSendDataqueue.size() == 1)
 		{
-			mSendPos = 0;
+			SendIO();
 		}
-
-		auto pSendBuf = &mSendBuf[mSendPos];
-
-		//전송될 메세지를 복사
-		CopyMemory(pSendBuf, pMsg_, dataSize_);
-		mSendPos += dataSize_;
 
 		return true;
 
-		//auto sendOverlappedEx = new stOverlappedEx;
-		//ZeroMemory(sendOverlappedEx, sizeof(stOverlappedEx));
-		//sendOverlappedEx->m_wsaBuf.len = dataSize_;
-		//sendOverlappedEx->m_wsaBuf.buf = new char[dataSize_];
-		//CopyMemory(sendOverlappedEx->m_wsaBuf.buf, pMsg_, dataSize_);
-		//sendOverlappedEx->m_eOperation = IOOperation::SEND;
-
-		//DWORD dwRecvNumBytes = 0;
-		//int nRet = WSASend(mSocket,
-		//	&(sendOverlappedEx->m_wsaBuf),
-		//	1,
-		//	&dwRecvNumBytes,
-		//	0,
-		//	(LPWSAOVERLAPPED)sendOverlappedEx,
-		//	NULL);
-
-		////socket_error이면 client socket이 끊어진걸로 처리한다.
-		//if (nRet == SOCKET_ERROR && (WSAGetLastError() != ERROR_IO_PENDING))
+		//if ((mSendPos + dataSize_) > MAX_SOCK_SENDBUF)
 		//{
-		//	printf("[에러] WSASend()함수 실패 : %d\n", WSAGetLastError());
-		//	return false;
+		//	mSendPos = 0;
 		//}
+
+		//auto pSendBuf = &mSendBuf[mSendPos];
+
+		////전송될 메세지를 복사
+		//CopyMemory(pSendBuf, pMsg_, dataSize_);
+		//mSendPos += dataSize_;
+
 		//return true;
 	}
 	
 	bool SendIO()
 	{
-		if (mSendPos <= 0 || mIsSending)
-		{
-			return true;
-		}
-
-		std::lock_guard<std::mutex> guard(mSendLock);
-
-		mIsSending = true;
-
-		CopyMemory(mSendingBuf, &mSendBuf[0], mSendPos);
-
-		//Overlapped I/O을 위해 각 정보를 셋팅해 준다.
-		mSendOverlappedEx.m_wsaBuf.len = mSendPos;
-		mSendOverlappedEx.m_wsaBuf.buf = &mSendingBuf[0];
-		mSendOverlappedEx.m_eOperation = IOOperation::SEND;
+		auto sendOverlappedEx = mSendDataqueue.front();
 
 		DWORD dwRecvNumBytes = 0;
 		int nRet = WSASend(mSocket,
-			&(mSendOverlappedEx.m_wsaBuf),
+			&(sendOverlappedEx->m_wsaBuf),
 			1,
 			&dwRecvNumBytes,
 			0,
-			(LPWSAOVERLAPPED) & (mSendOverlappedEx),
+			(LPWSAOVERLAPPED)sendOverlappedEx,
 			NULL);
+
+		//if (mSendPos <= 0 || mIsSending)
+		//{
+		//	return true;
+		//}
+
+		//std::lock_guard<std::mutex> guard(mSendLock);
+
+		//mIsSending = true;
+
+		//CopyMemory(mSendingBuf, &mSendBuf[0], mSendPos);
+
+		////Overlapped I/O을 위해 각 정보를 셋팅해 준다.
+		//mSendOverlappedEx.m_wsaBuf.len = mSendPos;
+		//mSendOverlappedEx.m_wsaBuf.buf = &mSendingBuf[0];
+		//mSendOverlappedEx.m_eOperation = IOOperation::SEND;
+
+		//DWORD dwRecvNumBytes = 0;
+		//int nRet = WSASend(mSocket,
+		//	&(mSendOverlappedEx.m_wsaBuf),
+		//	1,
+		//	&dwRecvNumBytes,
+		//	0,
+		//	(LPWSAOVERLAPPED) & (mSendOverlappedEx),
+		//	NULL);
 
 		//socket_error이면 client socket이 끊어진걸로 처리한다.
 		if (nRet == SOCKET_ERROR && (WSAGetLastError() != ERROR_IO_PENDING))
@@ -192,27 +196,40 @@ public:
 			return false;
 		}
 
-		mSendPos = 0;
+		//mSendPos = 0;
 		return true;
 	}
 
 	void SendCompleted(const UINT32 dataSize_)
 	{
-		mIsSending = false;
+		//mIsSending = false;
 		printf("[송신 완료] bytes : %d\n", dataSize_);
+
+		std::lock_guard<std::mutex> guard(mSendLock);
+
+		delete[] mSendDataqueue.front()->m_wsaBuf.buf;
+		delete mSendDataqueue.front();
+
+		mSendDataqueue.pop();
+
+		if (mSendDataqueue.empty() == false)
+		{
+			SendIO();
+		}
 	}
 
 private:
 	INT32 mIndex = 0;
 	SOCKET			mSocket;			//Cliet와 연결되는 소켓
 	stOverlappedEx	mRecvOverlappedEx;	//RECV Overlapped I/O작업을 위한 변수
-	stOverlappedEx	mSendOverlappedEx;	//SEND Overlapped I/O작업을 위한 변수
+	//stOverlappedEx	mSendOverlappedEx;	//SEND Overlapped I/O작업을 위한 변수
 
 	char			mRecvBuf[MAX_SOCKBUF];	//데이터 버퍼
 
 	std::mutex mSendLock;
-	bool mIsSending = false;
-	UINT64 mSendPos = 0;
-	char			mSendBuf[MAX_SOCK_SENDBUF]; //데이터 버퍼	
-	char			mSendingBuf[MAX_SOCK_SENDBUF]; //데이터 버퍼
+	std::queue<stOverlappedEx*> mSendDataqueue;
+	//bool mIsSending = false;
+	//UINT64 mSendPos = 0;
+	//char			mSendBuf[MAX_SOCK_SENDBUF]; //데이터 버퍼	
+	//char			mSendingBuf[MAX_SOCK_SENDBUF]; //데이터 버퍼
 };
